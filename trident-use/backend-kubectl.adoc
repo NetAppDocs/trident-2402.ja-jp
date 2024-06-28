@@ -1,0 +1,301 @@
+---
+sidebar: sidebar 
+permalink: trident-use/backend-kubectl.html 
+keywords: backends, storage system, anf, cvs for gcp, element, hci, solidfire, ontap, aff, fas, ontap select, configure backends, kubectl, create backends 
+summary: 'バックエンドは、 Astra Trident とストレージシステムの関係を定義します。Trident がストレージシステムとの通信方法を Trident から指示し、 Astra Trident がボリュームをプロビジョニングする方法も解説します。Astra Trident のインストールが完了したら、次の手順でバックエンドを作成します。。 `TridentBackendConfig` Custom Resource Definition（CRD）を使用すると、TridentバックエンドをKubernetesインターフェイスから直接作成および管理できます。これは、を使用して実行できます `kubectl` または、Kubernetesディストリビューションと同等のCLIツールを使用します。' 
+---
+= kubectl を使用してバックエンドを作成します
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+バックエンドは、 Astra Trident とストレージシステムの関係を定義します。Trident がストレージシステムとの通信方法を Trident から指示し、 Astra Trident がボリュームをプロビジョニングする方法も解説します。Astra Trident のインストールが完了したら、次の手順でバックエンドを作成します。。 `TridentBackendConfig` Custom Resource Definition（CRD）を使用すると、TridentバックエンドをKubernetesインターフェイスから直接作成および管理できます。これは、を使用して実行できます `kubectl` または、Kubernetesディストリビューションと同等のCLIツールを使用します。
+
+
+
+== `TridentBackendConfig`
+
+`TridentBackendConfig` (`tbc`、 `tbconfig`、 `tbackendconfig`）は、Astra Tridentをバックエンドで管理できるフロントエンドで、名前を付けたCRDです `kubectl`。Kubernetesやストレージ管理者は、専用のコマンドラインユーティリティを使用せずに、Kubernetes CLIを使用してバックエンドを直接作成、管理できるようになりました (`tridentctl`）。
+
+を作成したとき `TridentBackendConfig` オブジェクトの場合は次のようになります。
+
+* バックエンドは、指定した構成に基づいて Astra Trident によって自動的に作成されます。これは、内部的にはとして表されます `TridentBackend` (`tbe`、 `tridentbackend`）CR。
+* 。 `TridentBackendConfig` はに一意にバインドされます `TridentBackend` Astra Tridentによって作成されたのです。
+
+
+各 `TridentBackendConfig` では、1対1のマッピングを保持します `TridentBackend`。前者はバックエンドの設計と構成をユーザに提供するインターフェイスで、後者は Trident が実際のバックエンドオブジェクトを表す方法です。
+
+
+WARNING: `TridentBackend` CRSはAstra Tridentによって自動的に作成されます。これらは * 変更しないでください。バックエンドを更新する場合は、を変更して更新します `TridentBackendConfig` オブジェクト。
+
+の形式については、次の例を参照してください `TridentBackendConfig` CR：
+
+[listing]
+----
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc-ontap-san
+spec:
+  version: 1
+  backendName: ontap-san-backend
+  storageDriverName: ontap-san
+  managementLIF: 10.0.0.1
+  dataLIF: 10.0.0.2
+  svm: trident_svm
+  credentials:
+    name: backend-tbc-ontap-san-secret
+----
+の例を確認することもできます https://github.com/NetApp/trident/tree/stable/v21.07/trident-installer/sample-input/backends-samples["Trident インストーラ"^] 目的のストレージプラットフォーム / サービスの設定例を示すディレクトリ。
+
+。 `spec` バックエンド固有の設定パラメータを使用します。この例では、バックエンドはを使用します `ontap-san` storage driverおよびでは、に示す構成パラメータを使用します。ご使用のストレージドライバの設定オプションのリストについては、 link:backends.html["ストレージドライバのバックエンド設定情報"^]。
+
+。 `spec` セクションには、も含まれます `credentials` および `deletionPolicy` フィールドは、で新たに導入されました `TridentBackendConfig` CR：
+
+* `credentials`：このパラメータは必須フィールドで、ストレージシステム/サービスとの認証に使用されるクレデンシャルが含まれています。ユーザが作成した Kubernetes Secret に設定されます。クレデンシャルをプレーンテキストで渡すことはできないため、エラーになります。
+* `deletionPolicy`:このフィールドは、がどうなるかを定義します `TridentBackendConfig` が削除されました。次の 2 つの値のいずれかを指定できます。
++
+** `delete`:この結果、両方が削除されます `TridentBackendConfig` CRとそれに関連付けられたバックエンド。これがデフォルト値です。
+**  `retain`:時 `TridentBackendConfig` CRが削除され、バックエンド定義は引き続き存在し、で管理できます `tridentctl`。削除ポリシーをに設定しています `retain` 以前のリリース（21.04より前）にダウングレードし、作成されたバックエンドを保持することができます。このフィールドの値は、のあとに更新できます `TridentBackendConfig` が作成されます。
+
+
+
+
+
+NOTE: バックエンドの名前は、を使用して設定されます `spec.backendName`。指定しない場合、バックエンドの名前はの名前に設定されます `TridentBackendConfig` オブジェクト（metadata.name）。を使用してバックエンド名を明示的に設定することを推奨します `spec.backendName`。
+
+
+TIP: で作成されたバックエンド `tridentctl` が関連付けられていません `TridentBackendConfig` オブジェクト。このようなバックエンドの管理は、で選択できます `kubectl` を作成します `TridentBackendConfig` CR。同一の設定パラメータ（など）を指定するように注意する必要があります `spec.backendName`、 `spec.storagePrefix`、 `spec.storageDriverName`など）。新しく作成したTridentがAstraに自動的にバインドされる `TridentBackendConfig` 既存のバックエンドを使用します。
+
+
+
+== 手順の概要
+
+を使用して新しいバックエンドを作成します `kubectl`では、次の操作を実行する必要があります。
+
+. を作成します https://kubernetes.io/docs/concepts/configuration/secret/["Kubernetes Secret"^]。シークレットには、ストレージクラスタ / サービスと通信するために Trident から必要なクレデンシャルが含まれています。
+. を作成します `TridentBackendConfig` オブジェクト。ストレージクラスタ / サービスの詳細を指定し、前の手順で作成したシークレットを参照します。
+
+
+バックエンドを作成したら、を使用してそのステータスを確認できます `kubectl get tbc <tbc-name> -n <trident-namespace>` 追加の詳細情報を収集します。
+
+
+
+== 手順 1 ： Kubernetes Secret を作成します
+
+バックエンドのアクセスクレデンシャルを含むシークレットを作成します。ストレージサービス / プラットフォームごとに異なる固有の機能です。次に例を示します。
+
+[listing]
+----
+kubectl -n trident create -f backend-tbc-ontap-san-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-tbc-ontap-san-secret
+type: Opaque
+stringData:
+  username: cluster-admin
+  password: t@Ax@7q(>
+----
+次の表に、各ストレージプラットフォームの Secret に含める必要があるフィールドをまとめます。
+
+[cols="3"]
+|===
+| ストレージプラットフォームシークレットフィールドの説明 | 秘密 | Fields概要 
+
+
+| Azure NetApp Files の特長  a| 
+ClientID
+ a| 
+アプリケーション登録からのクライアント ID
+
+
+
+| Cloud Volumes Service for GCP  a| 
+private_key_id です
+ a| 
+秘密鍵の ID 。CVS 管理者ロールを持つ GCP サービスアカウントの API キーの一部
+
+
+
+| Cloud Volumes Service for GCP  a| 
+private_key を使用します
+ a| 
+秘密鍵CVS 管理者ロールを持つ GCP サービスアカウントの API キーの一部
+
+
+
+| Element （ NetApp HCI / SolidFire ）  a| 
+エンドポイント
+ a| 
+テナントのクレデンシャルを使用する SolidFire クラスタの MVIP
+
+
+
+| ONTAP  a| 
+ユーザ名
+ a| 
+クラスタ / SVM に接続するためのユーザ名。クレデンシャルベースの認証に使用されます
+
+
+
+| ONTAP  a| 
+パスワード
+ a| 
+クラスタ / SVM に接続するためのパスワード。クレデンシャルベースの認証に使用されます
+
+
+
+| ONTAP  a| 
+clientPrivateKey
+ a| 
+クライアント秘密鍵の Base64 エンコード値。証明書ベースの認証に使用されます
+
+
+
+| ONTAP  a| 
+chapUsername のコマンド
+ a| 
+インバウンドユーザ名。useCHAP = true の場合は必須。の場合 `ontap-san` および `ontap-san-economy`
+
+
+
+| ONTAP  a| 
+chapInitiatorSecret
+ a| 
+CHAP イニシエータシークレット。useCHAP = true の場合は必須。の場合 `ontap-san` および `ontap-san-economy`
+
+
+
+| ONTAP  a| 
+chapTargetUsername のコマンド
+ a| 
+ターゲットユーザ名。useCHAP = true の場合は必須。の場合 `ontap-san` および `ontap-san-economy`
+
+
+
+| ONTAP  a| 
+chapTargetInitiatorSecret
+ a| 
+CHAP ターゲットイニシエータシークレット。useCHAP = true の場合は必須。の場合 `ontap-san` および `ontap-san-economy`
+
+|===
+このステップで作成されたシークレットは、で参照されます `spec.credentials` のフィールド `TridentBackendConfig` 次のステップで作成されたオブジェクト。
+
+
+
+== 手順2：を作成します `TridentBackendConfig` CR
+
+これで、を作成する準備ができました `TridentBackendConfig` CR。この例では、を使用するバックエンド `ontap-san` ドライバは、を使用して作成されます `TridentBackendConfig` 以下のオブジェクト：
+
+[listing]
+----
+kubectl -n trident create -f backend-tbc-ontap-san.yaml
+----
+[listing]
+----
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc-ontap-san
+spec:
+  version: 1
+  backendName: ontap-san-backend
+  storageDriverName: ontap-san
+  managementLIF: 10.0.0.1
+  dataLIF: 10.0.0.2
+  svm: trident_svm
+  credentials:
+    name: backend-tbc-ontap-san-secret
+----
+
+
+== 手順3：のステータスを確認します `TridentBackendConfig` CR
+
+を作成しました `TridentBackendConfig` CRでは、ステータスを確認できます。次の例を参照してください。
+
+[listing]
+----
+kubectl -n trident get tbc backend-tbc-ontap-san
+NAME                    BACKEND NAME          BACKEND UUID                           PHASE   STATUS
+backend-tbc-ontap-san   ontap-san-backend     8d24fce7-6f60-4d4a-8ef6-bab2699e6ab8   Bound   Success
+----
+バックエンドが正常に作成され、にバインドされました `TridentBackendConfig` CR。
+
+フェーズには次のいずれかの値を指定できます。
+
+* `Bound`: `TridentBackendConfig` CRはバックエンドに関連付けられており、そのバックエンドにはが含まれています `configRef` をに設定します `TridentBackendConfig` crのuid
+* `Unbound`:を使用して表されます `""`。。 `TridentBackendConfig` オブジェクトがバックエンドにバインドされていません。新しく作成されたすべてのファイル `TridentBackendConfig` CRSはデフォルトでこのフェーズになっています。フェーズが変更された後、再度 Unbound に戻すことはできません。
+* `Deleting`: `TridentBackendConfig` CR `deletionPolicy` が削除対象に設定されました。をクリックします `TridentBackendConfig` CRが削除され、削除状態に移行します。
++
+** バックエンドに永続ボリューム要求（PVC）が存在しない場合は、を削除します `TridentBackendConfig` その結果、Astra Tridentによってバックエンドとが削除されます `TridentBackendConfig` CR。
+** バックエンドに 1 つ以上の PVC が存在する場合は、削除状態になります。。 `TridentBackendConfig` CRはその後、削除フェーズにも入ります。バックエンドと `TridentBackendConfig` は、すべてのPVCが削除されたあとにのみ削除されます。
+
+
+* `Lost`:に関連付けられているバックエンド `TridentBackendConfig` CRが誤って削除されたか、故意に削除された `TridentBackendConfig` CRには削除されたバックエンドへの参照があります。。 `TridentBackendConfig` CRは、に関係なく削除できます `deletionPolicy` 価値。
+* `Unknown`：Astra Tridentは、に関連付けられているバックエンドの状態または存在を特定できません `TridentBackendConfig` CR。たとえば、APIサーバが応答していない場合や、が応答していない場合などです `tridentbackends.trident.netapp.io` CRDがありません。これには介入が必要な場合があります
+
+
+この段階では、バックエンドが正常に作成されます。など、いくつかの操作を追加で処理することができます link:backend_ops_kubectl.html["バックエンドの更新とバックエンドの削除"^]。
+
+
+
+== （オプション）手順 4 ：詳細を確認します
+
+バックエンドに関する詳細情報を確認するには、次のコマンドを実行します。
+
+[listing]
+----
+kubectl -n trident get tbc backend-tbc-ontap-san -o wide
+----
+[listing]
+----
+NAME                    BACKEND NAME        BACKEND UUID                           PHASE   STATUS    STORAGE DRIVER   DELETION POLICY
+backend-tbc-ontap-san   ontap-san-backend   8d24fce7-6f60-4d4a-8ef6-bab2699e6ab8   Bound   Success   ontap-san        delete
+----
+さらに、のYAML／JSONダンプを取得することもできます `TridentBackendConfig`。
+
+[listing]
+----
+kubectl -n trident get tbc backend-tbc-ontap-san -o yaml
+----
+[listing]
+----
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  creationTimestamp: "2021-04-21T20:45:11Z"
+  finalizers:
+  - trident.netapp.io
+  generation: 1
+  name: backend-tbc-ontap-san
+  namespace: trident
+  resourceVersion: "947143"
+  uid: 35b9d777-109f-43d5-8077-c74a4559d09c
+spec:
+  backendName: ontap-san-backend
+  credentials:
+    name: backend-tbc-ontap-san-secret
+  managementLIF: 10.0.0.1
+  dataLIF: 10.0.0.2
+  storageDriverName: ontap-san
+  svm: trident_svm
+  version: 1
+status:
+  backendInfo:
+    backendName: ontap-san-backend
+    backendUUID: 8d24fce7-6f60-4d4a-8ef6-bab2699e6ab8
+  deletionPolicy: delete
+  lastOperationStatus: Success
+  message: Backend 'ontap-san-backend' created
+  phase: Bound
+----
+`backendInfo` が含まれます `backendName` および `backendUUID` に応答して作成されたバックエンドの `TridentBackendConfig` CR。。 `lastOperationStatus` フィールドは、の最後の操作のステータスを表します `TridentBackendConfig` CR。ユーザーがトリガすることができます（例えば、ユーザーがで何かを変更した場合など） `spec`）を使用するか、Astra Tridentによってトリガーされます（Astra Tridentの再起動時など）。Success または Failed のいずれかです。 `phase` は、間の関係のステータスを表します `TridentBackendConfig` CRとバックエンド。上記の例では、 `phase` 値はバインドされています。これは、を意味します `TridentBackendConfig` CRはバックエンドに関連付けられています。
+
+を実行できます `kubectl -n trident describe tbc <tbc-cr-name>` イベントログの詳細を確認するためのコマンドです。
+
+
+WARNING: 関連付けられているが含まれているバックエンドは更新または削除できません `TridentBackendConfig` を使用するオブジェクト `tridentctl`。切り替えに関連する手順を理解する `tridentctl` および `TridentBackendConfig`、 link:backend_options.html["こちらを参照してください"^]。

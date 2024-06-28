@@ -1,0 +1,453 @@
+---
+sidebar: sidebar 
+permalink: trident-reco/integrate-trident.html 
+keywords: kubernetes, clusters, nodes, components, master, compute, fsx, flexgroup, flexvolume, solidfire, hci, virtual pool, cvs, gcp, volumes 
+summary: Kubernetes クラスタは通常、 2 種類のノードで構成され、機能のさまざまな側面を担当します。 
+---
+= Astra Trident を統合
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+Astra Tridentを統合するには、設計とアーキテクチャに関する次の要素を統合する必要があります。ドライバの選択と導入、ストレージクラスの設計、仮想プールの設計、永続的ボリューム要求（PVC）によるストレージプロビジョニング、ボリューム運用、Astra Tridentを使用したOpenShiftサービスの導入。
+
+
+
+== ドライバの選択と展開
+
+ストレージシステム用のバックエンドドライバを選択して導入します。
+
+
+
+=== ONTAP バックエンドドライバ
+
+ONTAP バックエンドドライバは、使用されるプロトコルと、ストレージシステムでのボリュームのプロビジョニング方法によって異なります。そのため、どのドライバを展開するかを決定する際には、慎重に検討する必要があります。
+
+アプリケーションに共有ストレージを必要とするコンポーネント（同じ PVC にアクセスする複数のポッド）がある場合、 NAS ベースのドライバがデフォルトで選択されますが、ブロックベースの iSCSI ドライバは非共有ストレージのニーズを満たします。アプリケーションの要件と、ストレージチームとインフラチームの快適さレベルに基づいてプロトコルを選択してください。一般的に、ほとんどのアプリケーションでは両者の違いはほとんどないため、共有ストレージ（複数のポッドで同時にアクセスする必要がある場合）が必要かどうかに基づいて判断することがよくあります。
+
+使用可能なONTAP バックエンドドライバは次のとおりです。
+
+* `ontap-nas`：プロビジョニングされた各PVは、ONTAP のフルFlexVolです。
+* `ontap-nas-economy`：PVがプロビジョニングされた各ボリュームはqtreeであり、FlexVolあたりのqtree数は設定可能です（デフォルトは200）。
+* `ontap-nas-flexgroup`：すべてのONTAP FlexGroup としてプロビジョニングされたPVごとに、SVMに割り当てられたすべてのアグリゲートが使用されます。
+* `ontap-san`：プロビジョニングされた各PVは、固有のFlexVol内のLUNです。
+* `ontap-san-economy`：プロビジョニングされた各PVはLUNで、FlexVolあたりのLUN数は設定可能です（デフォルトは100）。
+
+
+3 つの NAS ドライバの間で選択すると、アプリケーションで使用できる機能にいくつかの影響があります。
+
+次の表では、 Astra Trident からすべての機能が提供されるわけではありません。一部の機能は、プロビジョニング後にストレージ管理者が適用する必要があります。上付き文字の脚注は、機能やドライバごとに機能を区別します。
+
+[cols="20,10,10,10,10,10,10,10"]
+|===
+| ONTAP NAS ドライバ | Snapshot | クローン | 動的なエクスポートポリシー | マルチアタッチ | QoS | サイズ変更 | レプリケーション 
+
+
+| `ontap-nas` | はい。 | はい。 | ○脚注： 5[] | はい。 | Yesfootnote: 1[] | はい。 | Yesfootnote: 1[] 
+
+
+| `ontap-nas-economy` | Yesfootnote: 3[] | Yesfootnote: 3[] | ○脚注： 5[] | はい。 | Yesfootnote: 3[] | はい。 | Yesfootnote: 3[] 
+
+
+| `ontap-nas-flexgroup` | Yesfootnote: 1[] | いいえ | ○脚注： 5[] | はい。 | Yesfootnote: 1[] | はい。 | Yesfootnote: 1[] 
+|===
+Astra Trident は、 ONTAP 向けに 2 つの SAN ドライバを提供しています。このドライバの機能は次のとおりです。
+
+[cols="20,10,10,10,10,10,10,10"]
+|===
+| ONTAP SANドライバ | Snapshot | クローン | マルチアタッチ | 双方向 CHAP | QoS | サイズ変更 | レプリケーション 
+
+
+| `ontap-san` | はい。 | はい。 | Yesfootnote: 4[] | はい。 | Yesfootnote: 1[] | はい。 | Yesfootnote: 1[] 
+
+
+| `ontap-san-economy` | はい。 | はい。 | Yesfootnote: 4[] | はい。 | Yesfootnote: 3[] | はい。 | Yesfootnote: 3[] 
+|===
+[verse]
+上記の表の脚注：
+Yesfootnote:1[]：Astra Tridentで管理されない
+Yesfootnote: 2[]：Astra Tridentが管理しますが、PV Granularは管理しません
+Yesfootnote: 3[]：Astra Tridentで管理されず、PV Granularでは管理されない
+Yesfootnote:4[]:raw-blockボリュームでサポート
+Yesfootnote: 5[]：Astra Tridentによるサポート
+
+PV に細分化されていない機能は FlexVol 全体に適用され、 PVS （共有 FlexVol 内の qtree または LUN ）にはすべて共通のスケジュールが適用されます。
+
+上の表に示すように、の機能の多くはです `ontap-nas` および `ontap-nas-economy` は同じです。しかし、だからです `ontap-nas-economy` ドライバは、PV単位でスケジュールを制御する機能を制限します。これは、ディザスタリカバリやバックアップ計画に特に影響を与える可能性があります。ONTAP ストレージでPVCクローン機能を利用したい開発チームの場合、この方法はを使用する場合にのみ使用できます `ontap-nas`、 `ontap-san` または `ontap-san-economy` ドライバ。
+
+
+NOTE: 。 `solidfire-san` また、ドライバはPVCをクローニングすることもできます。
+
+
+
+=== Cloud Volumes ONTAP バックエンドドライバ
+
+Cloud Volumes ONTAP は、ファイル共有や NAS および SAN プロトコル（ NFS 、 SMB / CIFS 、 iSCSI ）を提供するブロックレベルストレージなど、さまざまなユースケースでデータ制御とエンタープライズクラスのストレージ機能を提供します。Cloud Volume ONTAP の互換性のあるドライバはです `ontap-nas`、 `ontap-nas-economy`、 `ontap-san` および `ontap-san-economy`。Cloud Volume ONTAP for Azure と Cloud Volume ONTAP for GCP に該当します。
+
+
+
+=== ONTAP バックエンドドライバ用のAmazon FSX
+
+Amazon FSx for NetApp ONTAPを使用すると、AWSにデータを格納する際のシンプルさ、即応性、セキュリティ、拡張性を活用しながら、使い慣れたNetAppの機能、パフォーマンス、管理機能を活用できます。FSx for ONTAPは、多くのONTAPファイルシステム機能と管理APIをサポートしています。Cloud Volume ONTAP の互換性のあるドライバはです `ontap-nas`、 `ontap-nas-economy`、 `ontap-nas-flexgroup`、 `ontap-san` および `ontap-san-economy`。
+
+
+
+=== NetApp HCI / SolidFireバックエンドドライバ
+
+。 `solidfire-san` NetApp HCI / SolidFireプラットフォームで使用されるドライバ。管理者は、QoS制限に基づいてTrident用にElementバックエンドを設定できます。Tridentでプロビジョニングされるボリュームに特定のQoS制限を設定するためにバックエンドを設計する場合は、を使用してください `type` バックエンドファイル内のパラメータ。また、管理者は、を使用してストレージに作成できるボリュームサイズを制限することもできます `limitVolumeSize` パラメータ現在のところ、ボリュームのサイズ変更やボリュームのレプリケーションなどのElementストレージ機能は、ではサポートされていません `solidfire-san` ドライバ。これらの処理は、 Element ソフトウェアの Web UI から手動で実行する必要があります。
+
+[cols="20,10,10,10,10,10,10,10"]
+|===
+| SolidFire ドライバ | Snapshot | クローン | マルチアタッチ | CHAP | QoS | サイズ変更 | レプリケーション 
+
+
+| `solidfire-san` | はい。 | はい。 | ○脚注： 2 [] | はい。 | はい。 | はい。 | Yesfootnote: 1[] 
+|===
+[verse]
+脚注：
+Yesfootnote:1[]：Astra Tridentで管理されない
+Yesfootnote:2[]:raw-blockボリュームでサポート
+
+
+
+=== Azure NetApp Files バックエンドドライバ
+
+Astra Tridentがを使用 `azure-netapp-files` を管理するドライバ link:https://azure.microsoft.com/en-us/services/netapp/["Azure NetApp Files の特長"^] サービス
+
+このドライバの詳細と設定方法については、を参照してください link:https://docs.netapp.com/us-en/trident/trident-use/anf.html["Azure NetApp Files 向けの Trident バックエンド構成"^]。
+
+[cols="20,10,10,10,10,10,10"]
+|===
+| Azure NetApp Files ドライバ | Snapshot | クローン | マルチアタッチ | QoS | を展開します | レプリケーション 
+
+
+| `azure-netapp-files` | はい。 | はい。 | はい。 | はい。 | はい。 | Yesfootnote: 1[] 
+|===
+[verse]
+脚注：
+Yesfootnote:1[]：Astra Tridentで管理されない
+
+
+
+=== Google Cloudバックエンドドライバ上のCloud Volumes Service
+
+Astra Tridentがを使用 `gcp-cvs` Google CloudのCloud Volumes Service にリンクするドライバ。
+
+。 `gcp-cvs` ドライバは仮想プールを使用してバックエンドを抽象化し、Astra Tridentでボリュームの配置を判断できるようにします。管理者が、で仮想プールを定義します `backend.json` ファイル。ストレージクラスには、ラベルで仮想プールを識別するセレクタが使用されます。
+
+* バックエンドに仮想プールが定義されている場合、Astra Tridentは、その仮想プールが制限されているGoogle Cloudストレージプール内にボリュームを作成しようとします。
+* バックエンドに仮想プールが定義されていない場合、Astra Tridentは、リージョン内の使用可能なストレージプールからGoogle Cloudストレージプールを選択します。
+
+
+Astra TridentでGoogle Cloudバックエンドを設定するには、と指定する必要があります `projectNumber`、 `apiRegion`および `apiKey` バックエンドファイル内。プロジェクト番号はGoogle Cloudコンソールで確認できます。APIキーは、Google CloudでCloud Volumes Service のAPIアクセスを設定するときに作成したサービスアカウントの秘密鍵ファイルから取得されます。
+
+Google CloudでのCloud Volumes Serviceのサービスタイプとサービスレベルの詳細については、を参照してください。 link:../trident-use/gcp.html["CVS for GCPのAstra Tridentサポートについてご確認ください"]。
+
+[cols="20,10,10,10,10,10,10"]
+|===
+| Cloud Volumes Service for Google Cloudドライバ | Snapshot | クローン | マルチアタッチ | QoS | を展開します | レプリケーション 
+
+
+| `gcp-cvs` | はい。 | はい。 | はい。 | はい。 | はい。 | CVS -パフォーマンスサービスタイプでのみ利用できます。 
+|===
+[NOTE]
+====
+.レプリケーションに関する注意事項
+* レプリケーションはAstra Tridentで管理されていません。
+* クローンは、ソースボリュームと同じストレージプールに作成されます。
+
+
+====
+
+
+== ストレージクラスの設計
+
+Kubernetes ストレージクラスオブジェクトを作成するには、個々のストレージクラスを設定して適用する必要があります。このセクションでは、アプリケーション用のストレージクラスの設計方法について説明します。
+
+
+
+=== 特定のバックエンド使用率
+
+フィルタリングは、特定のストレージクラスオブジェクト内で使用でき、そのストレージクラスで使用するストレージプールまたはプールのセットを決定します。ストレージクラスでは、次の3セットのフィルタを設定できます。 `storagePools`、 `additionalStoragePools`または `excludeStoragePools`。
+
+。 `storagePools` パラメータを指定すると、指定した属性に一致するプールのセットだけにストレージが制限されます。。 `additionalStoragePools` パラメータは、属性とで選択されたプールのセットに加えて、Astra Tridentがプロビジョニングに使用する一連のプールを拡張するために使用されます `storagePools` パラメータどちらか一方のパラメータを単独で使用することも、両方を使用して、適切なストレージプールセットが選択されていることを確認することもできます。
+
+。 `excludeStoragePools` パラメータを使用すると、属性に一致する一連のプールが具体的に除外されます。
+
+
+
+=== QoSポリシーをエミュレートします
+
+ストレージクラスを設計してQoSポリシーをエミュレートする場合は、でストレージクラスを作成します `media` 属性の形式 `hdd` または `ssd`。に基づきます `media` ストレージクラスで説明されている属性の中から、Tridentが提供する適切なバックエンドを選択します `hdd` または `ssd` media属性に一致するアグリゲートを作成し、ボリュームのプロビジョニングを特定のアグリゲートに転送します。そこで、Premiumストレージクラスを作成します `media` 属性をとして設定します `ssd` Premium QoSポリシーに分類できます。メディア属性を「 hdd 」に設定し、標準の QoS ポリシーとして分類できる、別のストレージクラス標準を作成できます。また、ストレージクラスの「 IOPS 」属性を使用して、 QoS ポリシーとして定義できる Element アプライアンスにプロビジョニングをリダイレクトすることもできます。
+
+
+
+=== 特定の機能に基づいてバックエンドを利用する
+
+ストレージクラスは、シンプロビジョニングとシックプロビジョニング、 Snapshot 、クローン、暗号化などの機能が有効になっている特定のバックエンドでボリュームを直接プロビジョニングするように設計できます。使用するストレージを指定するには、必要な機能を有効にしてバックエンドに適したストレージクラスを作成します。
+
+
+
+=== 仮想プール
+
+仮想プールはすべてのAstra Tridentバックエンドで利用可能Tridentが提供する任意のドライバを使用して、任意のバックエンドに仮想プールを定義できます。
+
+仮想プールを使用すると、管理者はストレージクラスで参照可能なバックエンド上に抽象化レベルを作成して、バックエンドにボリュームを柔軟かつ効率的に配置できます。同じサービスクラスを使用して異なるバックエンドを定義できます。さらに、同じバックエンドに異なる特性を持つ複数のストレージプールを作成することもできます。セレクタで特定のラベルを設定したストレージクラスがある場合、 Astra Trident は、ボリュームを配置するすべてのセレクタラベルに一致するバックエンドを選択します。ストレージクラスセレクタのラベルが複数のストレージプールに一致した場合、Astra Tridentがボリュームのプロビジョニングに使用するストレージクラスを1つ選択します。
+
+
+
+== 仮想プールの設計
+
+バックエンドの作成時に、一般に一連のパラメータを指定できます。管理者が、同じストレージクレデンシャルと異なるパラメータセットを使用して別のバックエンドを作成することはできませんでした。仮想プールの導入により、この問題 は軽減されました。仮想プールは、バックエンドとKubernetesストレージクラスの間に導入されたレベル抽象化です。管理者は、Kubernetes Storage Classesでセレクターとして参照できるラベルとともにパラメータをバックエンドに依存しない方法で定義できます。仮想プールは、サポートされているすべてのネットアップバックエンドにAstra Tridentを使用して定義できます。リストには、 SolidFire / NetApp HCI 、 ONTAP 、 GCP 上の Cloud Volumes Service 、 Azure NetApp Files が含まれます。
+
+
+NOTE: 仮想プールを定義する場合は、バックエンド定義で既存の仮想プールの順序を変更しないことをお勧めします。また、既存の仮想プールの属性を編集または変更したり、新しい仮想プールを定義したりしないことを推奨します。
+
+
+
+=== さまざまなサービスレベル/QoSのエミュレート
+
+サービスクラスをエミュレートするための仮想プールを設計できます。Cloud Volume Service for Azure NetApp Files の仮想プール実装を使用して、さまざまなサービスクラスをセットアップする方法を見ていきましょう。Azure NetApp Filesバックエンドには、異なるパフォーマンスレベルを表す複数のラベルを設定します。設定 `servicelevel` 適切なパフォーマンスレベルを考慮し、各ラベルの下にその他の必要な側面を追加します。次に、異なる仮想プールにマッピングするさまざまなKubernetesストレージクラスを作成します。を使用する `parameters.selector` 各StorageClassは、ボリュームのホストに使用できる仮想プールを呼び出します。
+
+
+
+=== 特定の一連の側面を割り当てます
+
+特定の側面を持つ複数の仮想プールは、単一のストレージバックエンドから設計できます。そのためには、バックエンドに複数のラベルを設定し、各ラベルに必要な側面を設定します。を使用して、さまざまなKubernetesストレージクラスを作成します `parameters.selector` 異なる仮想プールにマッピングされるフィールド。バックエンドでプロビジョニングされるボリュームには、選択した仮想プールに定義された設定が適用されます。
+
+
+
+=== ストレージプロビジョニングに影響する PVC 特性
+
+要求されたストレージクラスを超えたパラメータの中には、PVCを作成する際にAstra Tridentプロビジョニングの判断プロセスに影響するものがあります。
+
+
+
+=== アクセスモード
+
+PVC 経由でストレージを要求する場合、必須フィールドの 1 つがアクセスモードです。必要なモードは、ストレージ要求をホストするために選択されたバックエンドに影響を与える可能性があります。
+
+Astra Trident は、次のマトリックスで指定されたアクセス方法で使用されているストレージプロトコルと一致するかどうかを試みます。これは、基盤となるストレージプラットフォームに依存しません。
+
+[cols="20,30,30,30"]
+|===
+|  | ReadWriteOnce コマンドを使用します | ReadOnlyMany | ReadWriteMany 
+
+
+| iSCSI | はい。 | はい。 | ○（ Raw ブロック） 
+
+
+| NFS | はい。 | はい。 | はい。 
+|===
+NFS バックエンドが設定されていない Trident 環境に送信された ReadWriteMany PVC が要求された場合、ボリュームはプロビジョニングされません。このため、リクエスタは、アプリケーションに適したアクセスモードを使用する必要があります。
+
+
+
+== ボリューム操作
+
+
+
+=== 永続ボリュームの変更
+
+永続ボリュームとは、 Kubernetes で変更不可のオブジェクトを 2 つだけ除いてです。再利用ポリシーとサイズは、いったん作成されると変更できます。ただし、これにより、ボリュームの一部の要素がKubernetes以外で変更されることが防止されるわけではありません。特定のアプリケーション用にボリュームをカスタマイズしたり、誤って容量が消費されないようにしたり、何らかの理由でボリュームを別のストレージコントローラに移動したりする場合に便利です。
+
+
+NOTE: Kubernetes のツリー内プロビジョニングツールは、現時点では NFS または iSCSI PVS のボリュームサイズ変更処理をサポートしていません。Astra Trident では、 NFS ボリュームと iSCSI ボリュームの両方の拡張がサポートされています。
+
+作成後に PV の接続の詳細を変更することはできません。
+
+
+
+=== オンデマンドのボリューム Snapshot を作成
+
+Astra Trident は、 CSI フレームワークを使用して、オンデマンドでボリュームスナップショットを作成し、スナップショットから PVC を作成できます。Snapshot は、データのポイントインタイムコピーを管理し、 Kubernetes のソース PV とは無関係にライフサイクルを管理する便利な方法です。これらの Snapshot を使用して、 PVC をクローニングできます。
+
+
+
+=== Snapshot からボリュームを作成します
+
+Astra Trident は、ボリューム Snapshot からの PersistentVolumes の作成もサポートしています。これを実現するには、PersistentVolumeClaimを作成し、を指定します `datasource` ボリュームの作成元となる必要があるSnapshot。Astra Trident がこの PVC を処理するには、 Snapshot にデータが存在するボリュームを作成します。この機能を使用すると、複数のリージョン間でデータを複製したり、テスト環境を作成したり、破損した本番ボリューム全体を交換したり、特定のファイルとディレクトリを取得して別の接続ボリュームに転送したりできます。
+
+
+
+=== クラスタ内でボリュームを移動します
+
+ストレージ管理者は、 ONTAP クラスタ内のアグリゲート間およびコントローラ間で、ストレージ利用者への無停止でボリュームを移動できます。この処理は、デスティネーションアグリゲートが Trident が使用している SVM からアクセス可能なアグリゲートであるかぎり、 Astra Trident または Kubernetes クラスタには影響しません。この点が重要なのは、アグリゲートが SVM に新たに追加された場合、 Astra Trident に再追加してバックエンドを更新する必要があることです。これにより、 Astra Trident が SVM のインベントリを再作成し、新しいアグリゲートが認識されるようになります。
+
+ただし、バックエンド間でのボリュームの移動は Astra Trident では自動ではサポートされていません。これには、同じクラスタ内の SVM 間、クラスタ間、または別のストレージプラットフォーム上の SVM 間が含まれます（たとえストレージシステムが Trident から Astra に接続されている場合でも）。
+
+ボリュームが別の場所にコピーされた場合、ボリュームインポート機能を使用して現在のボリュームを Astra Trident にインポートできます。
+
+
+
+=== ボリュームを展開します
+
+Astra Trident は、 NFS と iSCSI PVS のサイズ変更をサポートしています。これにより、ユーザは Kubernetes レイヤを介してボリュームのサイズを直接変更できます。ボリュームを拡張できるのは、 ONTAP 、 SolidFire / NetApp HCI 、 Cloud Volumes Service バックエンドなど、主要なすべてのネットアップストレージプラットフォームです。あとで拡張できるようにするには、をに設定します `allowVolumeExpansion` 終了： `true` ボリュームに関連付けられているストレージクラス内のストレージクラス。永続ボリュームのサイズを変更する必要がある場合は、を編集します `spec.resources.requests.storage` Persistent Volume Claimのアノテーションを、必要なボリュームサイズに設定します。Tridentによって、ストレージクラスタ上のボリュームのサイズが自動的に変更されます。
+
+
+
+=== 既存のボリュームを Kubernetes にインポートする
+
+Volume Import では、既存のストレージボリュームを Kubernetes 環境にインポートできます。これは現在、でサポートされています `ontap-nas`、 `ontap-nas-flexgroup`、 `solidfire-san`、 `azure-netapp-files`および `gcp-cvs` ドライバ。この機能は、既存のアプリケーションを Kubernetes に移植する場合や、ディザスタリカバリシナリオで使用する場合に便利です。
+
+ONTAP およびを使用する場合 `solidfire-san` ドライバの場合は、コマンドを使用します `tridentctl import volume <backend-name> <volume-name> -f /path/pvc.yaml` 既存のボリュームをKubernetesにインポートしてAstra Tridentで管理import volume コマンドで使用した PVC YAML または JSON ファイルは、 Astra Trident をプロビジョニングツールとして識別するストレージクラスを指定します。NetApp HCI / SolidFire バックエンドを使用する場合は、ボリューム名が一意であることを確認してください。ボリューム名が重複している場合は、ボリュームインポート機能で区別できるように、ボリュームを一意の名前にクローニングします。
+
+状況に応じて `azure-netapp-files` または `gcp-cvs` ドライバを使用する場合は、コマンドを使用します `tridentctl import volume <backend-name> <volume path> -f /path/pvc.yaml` からKubernetesにボリュームをインポートしてAstra Tridentで管理。これにより、ボリューム参照が一意になります。
+
+上記のコマンドを実行すると、 Astra Trident がバックエンド上にボリュームを検出し、サイズを確認します。設定されたPVCのボリュームサイズを自動的に追加（および必要に応じて上書き）します。次に Astra Trident が新しい PV を作成し、 Kubernetes が PVC を PV にバインド
+
+特定のインポートされた PVC を必要とするようにコンテナを導入した場合、ボリュームインポートプロセスによって PVC/PV ペアがバインドされるまで、コンテナは保留状態のままになります。PVC/PV ペアがバインドされると、他に問題がなければコンテナが起動します。
+
+
+
+== OpenShift サービスを導入します
+
+OpenShift の付加価値クラスタサービスは、クラスタ管理者とホストされているアプリケーションに重要な機能を提供します。これらのサービスが使用するストレージはノードローカルリソースを使用してプロビジョニングできますが、これにより、サービスの容量、パフォーマンス、リカバリ性、持続可能性が制限されることがよくあります。エンタープライズストレージアレイを活用してこれらのサービスに容量を提供することで、劇的に向上したサービスを実現できます。ただし、すべてのアプリケーションと同様に、 OpenShift とストレージ管理者は、緊密に連携してそれぞれに最適なオプションを決定する必要があります。Red Hat のドキュメントは、要件を決定し、サイジングとパフォーマンスのニーズを確実に満たすために大きく活用する必要があります。
+
+
+
+=== レジストリサービス
+
+レジストリのストレージの導入と管理については、に記載されています link:https://netapp.io/["netapp.io のコマンドです"^] を参照してください link:https://netapp.io/2017/08/24/deploying-the-openshift-registry-using-netapp-storage/["ブログ"^]。
+
+
+
+=== ロギングサービス
+
+他の OpenShift サービスと同様に、ログ記録サービスは、 Ansible と、インベントリファイル（別名）で提供される構成パラメータを使用して導入されますホスト。プレイブックに含まれています。インストール方法には、OpenShiftの初期インストール時にログを導入する方法と、OpenShiftが終了した後にログを導入する方法の2つがあります。
+インストール済み。
+
+
+CAUTION: Red Hat OpenShift バージョン 3.9 以降、データ破損に関する懸念があるため、記録サービスに NFS を使用しないことを公式のドキュメントで推奨しています。これは、 Red Hat 製品のテストに基づいています。ONTAP NFSサーバにはこのような問題がないため、ロギング環境を簡単にバックアップできます。ロギングサービスには最終的にどちらかのプロトコルを選択する必要がありますが、両方のプロトコルがネットアッププラットフォームを使用する場合に適していることと、 NFS を使用する理由がないことを確認してください。
+
+ロギングサービスでNFSを使用する場合は、Ansible変数を設定する必要があります `openshift_enable_unsupported_configurations` 終了： `true` インストーラが失敗しないようにします。
+
+
+
+==== はじめに
+
+ロギングサービスは、必要に応じて、両方のアプリケーションに導入することも、 OpenShift クラスタ自体のコア動作に導入することもできます。操作ログを配置する場合は、変数を指定します `openshift_logging_use_ops` として `true`サービスのインスタンスが2つ作成されます。操作のロギングインスタンスを制御する変数には「 ops 」が含まれ、アプリケーションのインスタンスには含まれません。
+
+基盤となるサービスで正しいストレージが使用されるようにするには、導入方法に応じてAnsible変数を設定することが重要です。それぞれの導入方法のオプションを見てみましょう。
+
+
+NOTE: 次の表には、ロギングサービスに関連するストレージ構成に関連する変数のみを示します。その他のオプションは、で確認できます link:https://docs.openshift.com/container-platform/3.11/install_config/aggregate_logging.html["Red Hat OpenShift のロギングに関するドキュメント"^] 導入環境に応じて、確認、設定、使用する必要があります。
+
+次の表の変数では、入力した詳細を使用してロギングサービスの PV と PVC を作成する Ansible プレイブックが作成されます。この方法は、 OpenShift インストール後にコンポーネントインストールプレイブックを使用するよりもはるかに柔軟性に劣るが、既存のボリュームがある場合はオプションとなります。
+
+[cols="40,40"]
+|===
+| 変数（ Variable ） | 詳細 
+
+
+| `openshift_logging_storage_kind` | をに設定します `nfs` ログ記録サービス用のNFS PVを作成するため。 
+
+
+| `openshift_logging_storage_host` | NFS ホストのホスト名または IP アドレス。仮想マシンのデータ LIF に設定してください。 
+
+
+| `openshift_logging_storage_nfs_directory` | NFS エクスポートのマウントパス。たとえば、ボリュームがとしてジャンクションされている場合などです `/openshift_logging`この変数には、このパスを使用します。 
+
+
+| `openshift_logging_storage_volume_name` | 名前。例 `pv_ose_logs`作成するPVの。 
+
+
+| `openshift_logging_storage_volume_size` | たとえば、NFSエクスポートのサイズ `100Gi`。 
+|===
+OpenShift クラスタがすでに実行中で、そのため Trident を導入して設定した場合、インストーラは動的プロビジョニングを使用してボリュームを作成できます。次の変数を設定する必要があります。
+
+[cols="40,40"]
+|===
+| 変数（ Variable ） | 詳細 
+
+
+| `openshift_logging_es_pvc_dynamic` | 動的にプロビジョニングされたボリュームを使用する場合は true に設定します。 
+
+
+| `openshift_logging_es_pvc_storage_class_name` | PVC で使用されるストレージクラスの名前。 
+
+
+| `openshift_logging_es_pvc_size` | PVC で要求されたボリュームのサイズ。 
+
+
+| `openshift_logging_es_pvc_prefix` | ロギングサービスで使用される PVC のプレフィックス。 
+
+
+| `openshift_logging_es_ops_pvc_dynamic` | をに設定します `true` 動的にプロビジョニングされたボリュームをopsロギングインスタンスに使用する。 
+
+
+| `openshift_logging_es_ops_pvc_storage_class_name` | 処理ロギングインスタンスのストレージクラスの名前。 
+
+
+| `openshift_logging_es_ops_pvc_size` | 処理インスタンスのボリューム要求のサイズ。 
+
+
+| `openshift_logging_es_ops_pvc_prefix` | ops インスタンス PVC のプレフィックス。 
+|===
+
+
+==== ロギングスタックを導入します
+
+初期の OpenShift インストールプロセスの一部としてロギングを導入する場合、標準の導入プロセスに従うだけで済みます。Ansible は、必要なサービスと OpenShift オブジェクトを構成および導入して、 Ansible が完了したらすぐにサービスを利用できるようにします。
+
+ただし、最初のインストール後に導入する場合は、コンポーネントプレイブックを Ansible で使用する必要があります。このプロセスは、 OpenShift のバージョンが異なるためわずかに変更される場合があるので、必ず読んで従うようにしてください link:https://docs.openshift.com/container-platform/3.11/welcome/index.html["Red Hat OpenShift Container Platform 3.11 のドキュメント"^] 使用しているバージョンに対応した
+
+
+
+== 指標サービス
+
+この指標サービスは、 OpenShift クラスタのステータス、リソース利用率、可用性に関する重要な情報を管理者に提供します。ポッドの自動拡張機能にも必要であり、多くの組織では、チャージバックやショーバックのアプリケーションに指標サービスのデータを使用しています。
+
+ロギングサービスや OpenShift 全体と同様に、 Ansible を使用して指標サービスを導入します。また、ロギングサービスと同様に、メトリクスサービスは、クラスタの初期セットアップ中、またはコンポーネントのインストール方法を使用して運用後に導入できます。次の表に、指標サービスに永続的ストレージを設定する際に重要となる変数を示します。
+
+
+NOTE: 以下の表には、指標サービスに関連するストレージ構成に関連する変数のみが含まれています。このドキュメントには、他にも導入環境に応じて確認、設定、使用できるオプションが多数あります。
+
+[cols="40,40"]
+|===
+| 変数（ Variable ） | 詳細 
+
+
+| `openshift_metrics_storage_kind` | をに設定します `nfs` ログ記録サービス用のNFS PVを作成するため。 
+
+
+| `openshift_metrics_storage_host` | NFS ホストのホスト名または IP アドレス。これは SVM のデータ LIF に設定されている必要があります。 
+
+
+| `openshift_metrics_storage_nfs_directory` | NFS エクスポートのマウントパス。たとえば、ボリュームがとしてジャンクションされている場合などです `/openshift_metrics`この変数には、このパスを使用します。 
+
+
+| `openshift_metrics_storage_volume_name` | 名前、
+例： `pv_ose_metrics`作成するPVの。 
+
+
+| `openshift_metrics_storage_volume_size` | たとえば、NFSエクスポートのサイズ `100Gi`。 
+|===
+OpenShift クラスタがすでに実行中で、そのため Trident を導入して設定した場合、インストーラは動的プロビジョニングを使用してボリュームを作成できます。次の変数を設定する必要があります。
+
+[cols="40,40"]
+|===
+| 変数（ Variable ） | 詳細 
+
+
+| `openshift_metrics_cassandra_pvc_prefix` | メトリック PVC に使用するプレフィックス。 
+
+
+| `openshift_metrics_cassandra_pvc_size` | 要求するボリュームのサイズ。 
+
+
+| `openshift_metrics_cassandra_storage_type` | 指標に使用するストレージのタイプ。適切なストレージクラスを使用して PVC を作成するには、 Ansible に対してこれを dynamic に設定する必要があります。 
+
+
+| `openshift_metrics_cassanda_pvc_storage_class_name` | 使用するストレージクラスの名前。 
+|===
+
+
+=== 指標サービスを導入する
+
+ホスト / インベントリファイルに適切な Ansible 変数を定義して、 Ansible でサービスを導入します。OpenShift インストール時に導入する場合は、 PV が自動的に作成されて使用されます。コンポーネントプレイブックを使用して導入する場合は、OpenShiftのインストール後にAnsibleによって必要なPVCが作成され、Astra Tridentによってストレージがプロビジョニングされたあとにサービスが導入されます。
+
+上記の変数と導入プロセスは、 OpenShift の各バージョンで変更される可能性があります。必ず見直しを行ってください link:https://docs.openshift.com/container-platform/3.11/install_config/cluster_metrics.html["RedHat OpenShift 導入ガイド"^] をバージョンに合わせて設定し、環境に合わせて設定します。
