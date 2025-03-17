@@ -21,5 +21,4 @@ Astra Trident 24.02を実行していない場合、以前のリリースのド�
 * https://docs.netapp.com/us-en/trident-2210/index.html["Astra Trident 22.10"^]
 * https://docs.netapp.com/us-en/trident-2207/index.html["トライデント22.07年アストラト"^]
 * https://docs.netapp.com/us-en/trident-2204/index.html["トライデント22.04アストラ"^]
-* https://docs.netapp.com/us-en/trident-2201/index.html["Trident 22.01"^]
 
