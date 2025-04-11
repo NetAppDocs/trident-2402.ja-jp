@@ -4510,4 +4510,6 @@ Tridentのインスタンスを1つ使用することで、
   <block id="e932e8b67111a2dc118d7599f04cdc8b" category="paragraph">Astra Control ProvisionerがSnapshotからデータをリストアします。Snapshotのリストアステータスを確認できます。</block>
   <block id="454c5148c2a664f37fc49833dc491272" category="list-text">ほとんどの場合、障害が発生したときにAstra Control Provisionerで処理が自動的に再試行されません。この操作を再度実行する必要があります。</block>
   <block id="c83b74c2020dd836f5b401ecda0da78c" category="list-text">管理者アクセス権を持たないKubernetesユーザは、アプリケーションネームスペースにTASR CRを作成するために、管理者から権限を付与されなければならない場合があります。</block>
+  <block id="fd2382cbf04a0cd551917ebb29238078" category="paragraph">長いノード名を持つKubernetes環境でNVMe/TCPを使用すると、ポッドをストレージに接続できません。</block>
+  <block id="aa68fd6175a82d0d7c1dda4f60cac719" category="paragraph">サブシステム名が64文字未満になるようにノード名を短くします。</block>
 </blocks>
