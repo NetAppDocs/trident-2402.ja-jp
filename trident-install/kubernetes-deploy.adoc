@@ -1,7 +1,7 @@
 ---
 sidebar: sidebar 
 permalink: trident-get-started/kubernetes-deploy.html 
-keywords: deploy, astra trident, methods, operator, tridentctl, helm, tanzu, vmware 
+keywords: deploy, astra trident, methods, operator, tridentctl, helm, tanzu, vmware, netapp console 
 summary: 'Tridentは、Tridentオペレータ（手動またはHelmを使用）またはでインストールできます `tridentctl`。このトピックでは、適切なインストールプロセスを選択するための重要な情報を提供します。' 
 ---
 = Astra Tridentのインストール方法をご確認ください
@@ -115,10 +115,10 @@ Kubernetes バージョンのクラスタをサポート対象バージョンに
 NOTE: クラスタがサポート対象外のバージョンにアップグレードされた場合、オペレータによって Astra Trident はインストールされません。Astra Trident がすでにオペレータとともにインストールされている場合、サポート対象外の Kubernetes バージョンに Astra Trident がインストールされていることを示す警告が表示されます。
 
 ====
-.BlueXP（旧Cloud Manager）</strong> を使用した<strong> Kubernetesクラスタ管理
+.<strong> NetApp Consoleを使用した Kubernetes クラスタ管理</strong>
 [%collapsible]
 ====
-を使用 link:https://docs.netapp.com/us-en/cloud-manager-kubernetes/concept-kubernetes.html["Astra TridentでBlueXPを使用"^]では、最新バージョンのAstra Tridentにアップグレードし、ストレージクラスを追加して管理し、作業環境に接続し、Cloud Backup Service を使用して永続的ボリュームをバックアップすることができます。BlueXPは、Tridentオペレータを使用したAstra Tridentの導入を、手動またはHelmを使用してサポートしています。
+NetApp Consoleを使用するAstra Tridentでは、最新バージョンのAstra Tridentにアップグレードしたり、ストレージ クラスを追加および管理して作業環境に接続したり、 Cloud Backup Serviceを使用して永続ボリュームをバックアップしたりできます。コンソールは、手動または Helm を使用して、 Tridentオペレーターを使用したAstra Trident のデプロイメントをサポートします。
 
 ====
 
