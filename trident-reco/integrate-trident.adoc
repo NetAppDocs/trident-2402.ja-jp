@@ -115,7 +115,7 @@ Yesfootnote:2[]:raw-blockボリュームでサポート
 
 === Azure NetApp Files バックエンドドライバ
 
-Astra Tridentがを使用 `azure-netapp-files` を管理するドライバ link:https://azure.microsoft.com/en-us/services/netapp/["Azure NetApp Files の特長"^] サービス
+Astra Trident は `azure-netapp-files`ドライバーを使用してlink:https://azure.microsoft.com/en-us/products/netapp/["Azure NetApp Files の特長"^]サービスを管理します。
 
 このドライバの詳細と設定方法については、を参照してください link:https://docs.netapp.com/us-en/trident/trident-use/anf.html["Azure NetApp Files 向けの Trident バックエンド構成"^]。
 

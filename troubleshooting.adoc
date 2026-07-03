@@ -57,7 +57,7 @@ tridentctl を使用してインストールされます::
 
 * を含めて、各バックエンドのデバッグログを取得することもできます `debugTraceFlags` バックエンドの定義に含まれています。たとえば、と指定します `debugTraceFlags: {“api”:true, “method”:true,}` TridentログでAPI呼び出しとメソッドの逆数を取得する。既存のバックエンドにはを追加できます `debugTraceFlags` を使用して設定します `tridentctl backend update`。
 * Red Hat CoreOSを使用する場合は、次の点を確認してください `iscsid` はワーカーノードで有効になり、デフォルトで開始されます。この設定には、 OpenShift MachineConfig を使用するか、イグニッションテンプレートを変更します。
-* Trident をで使用する際によく発生する問題です https://azure.microsoft.com/en-us/services/netapp/["Azure NetApp Files の特長"] テナントとクライアントのシークレットが、必要な権限がないアプリケーションの登録から取得された場合です。Tridentの要件の一覧については、 link:trident-use/anf.html["Azure NetApp Files の特長"] 設定
+* Tridentを https://azure.microsoft.com/en-us/products/netapp/["Azure NetApp Files の特長"]で使用する際に発生する可能性のある一般的な問題は、テナントシークレットとクライアントシークレットが、権限が不十分なアプリ登録から取得された場合です。Trident要件の完全なリストについては、link:trident-use/anf.html["Azure NetApp Files の特長"]構成を参照してください。
 * PVをコンテナにマウントする際に問題が発生する場合は、を確認してください `rpcbind` をインストールして実行しておきます。ホストOSに必要なパッケージマネージャを使用して、かどうかを確認します `rpcbind` を実行しています。のステータスを確認できます `rpcbind` を実行してサービスを提供します `systemctl status rpcbind` またはそれと同等のものです。
 * Tridentバックエンドがにあると報告した場合 `failed` 以前は対処したことがあるにもかかわらず、状況はバックエンドに関連付けられたSVM /管理者クレデンシャルの変更が原因であると考えられます。を使用したバックエンド情報の更新 `tridentctl update backend` Tridentポッドをバウンスすると、この問題 が修正されます。
 * TridentをDockerでコンテナランタイムとしてインストールする際に権限の問題が発生した場合は、Tridentのインストールをで試してください `--in cluster=false` フラグ。これはインストーラポッドを使用せず、に起因する許可の問題を回避する `trident-installer` ユーザ：
